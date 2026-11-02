@@ -238,6 +238,18 @@ modal_image = (
         "blindlog==1.2.1",
         "PyGithub==2.3.0",
         "patch==1.16",
+        "openai>=1.35.7",
+        "httpx>=0.27.0",
+    )
+    # Bake all local source modules into the image so they're importable in the container
+    .add_local_python_source(
+        "pipeline",
+        "pii_scrubber",
+        "modal_sam",
+        "modal_reasoning",
+        "modal_coder",
+        "github_ops",
+        copy=True,
     )
 )
 
@@ -248,7 +260,6 @@ app = modal.App("aegissre-webhook")
     image=modal_image,
     secrets=[
         modal.Secret.from_name("aegis-modal-secrets"),
-        modal.Secret.from_name("aegis-github-secrets"),
         modal.Secret.from_name("aegis-webhook-secrets"),
     ],
     min_containers=1,

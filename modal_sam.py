@@ -41,14 +41,16 @@ app = modal.App("aegissre-sam")
 # ---------------------------------------------------------------------------
 weights_volume = modal.Volume.from_name("aegissre-sam-weights", create_if_missing=True)
 WEIGHTS_DIR = "/weights"
-MODEL_ID = "facebook/sam2.1-hiera-large"
+MODEL_ID = "facebook/sam2.1-hiera-tiny"      # ~38MB — practical on CPU, no GPU needed
+MODEL_CFG = "configs/sam2.1/sam2.1_hiera_t.yaml"
+CHECKPOINT = "sam2.1_hiera_tiny.pt"
 
 
 @app.function(
     image=sam_image,
-    gpu="A10G",
+
     volumes={WEIGHTS_DIR: weights_volume},
-    timeout=120,
+    timeout=600,   # SAM weights download + CPU inference can take several minutes
     scaledown_window=60,
 )
 def segment_image(image_b64: str, prompt_points: Optional[list] = None) -> dict:
@@ -80,15 +82,14 @@ def segment_image(image_b64: str, prompt_points: Optional[list] = None) -> dict:
     CONFIDENCE_THRESHOLD = 0.70
 
     # --- 1. Download / load weights (cached in volume) ---
-    local_model_dir = os.path.join(WEIGHTS_DIR, "sam2.1-hiera-large")
+    local_model_dir = os.path.join(WEIGHTS_DIR, "sam2.1-hiera-tiny")
     if not os.path.exists(local_model_dir):
         snapshot_download(repo_id=MODEL_ID, local_dir=local_model_dir)
         weights_volume.commit()
 
-    checkpoint = os.path.join(local_model_dir, "sam2.1_hiera_large.pt")
-    model_cfg = "configs/sam2.1/sam2.1_hiera_l.yaml"
+    checkpoint = os.path.join(local_model_dir, CHECKPOINT)
 
-    sam2_model = build_sam2(model_cfg, checkpoint, device="cuda")
+    sam2_model = build_sam2(MODEL_CFG, checkpoint, device="cpu")
 
     # --- 2. Decode input image ---
     image_bytes = base64.b64decode(image_b64)
@@ -142,8 +143,10 @@ def segment_image(image_b64: str, prompt_points: Optional[list] = None) -> dict:
     seg = best_mask["segmentation"]  # bool H×W array
     rows = np.any(seg, axis=1)
     cols = np.any(seg, axis=0)
-    y1, y2 = int(np.where(rows)[0][[0, -1]])
-    x1, x2 = int(np.where(cols)[0][[0, -1]])
+    row_indices = np.where(rows)[0]
+    col_indices = np.where(cols)[0]
+    y1, y2 = int(row_indices[0]),  int(row_indices[-1])
+    x1, x2 = int(col_indices[0]),  int(col_indices[-1])
     bbox = [x1, y1, x2, y2]
 
     # --- 7. Crop anomaly region (add 8px padding) ---
@@ -195,17 +198,11 @@ def _fallback_result(full_image, reason: str) -> dict:
 # Local test entrypoint
 # ---------------------------------------------------------------------------
 @app.local_entrypoint()
-def main():
+def main(image: str = "test_screenshot.png"):
     """Quick smoke-test: encode a local PNG and call the remote function."""
-    import sys
-
-    if len(sys.argv) < 2:
-        print("Usage: modal run modal_sam.py --image path/to/screenshot.png")
-        return
-
-    path = sys.argv[1]
-    with open(path, "rb") as f:
+    with open(image, "rb") as f:
         b64 = base64.b64encode(f.read()).decode()
 
+    print(f"Sending {image} to SAM 2.1 ...")
     result = segment_image.remote(b64)
     print(result)
