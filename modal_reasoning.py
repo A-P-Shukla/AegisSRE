@@ -22,8 +22,9 @@ import modal
 reasoning_image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install(
-        "openai==1.35.7",
+        "openai==1.57.0",
         "python-dotenv==1.0.1",
+        "httpx==0.27.0",   # pin httpx to avoid proxies kwarg conflict
     )
 )
 
@@ -174,11 +175,11 @@ def analyze_failure(
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},
             ],
-            temperature=0.1,   # Low temp for deterministic structured output
-            max_tokens=1024,
+            temperature=0.1,
+            max_tokens=4096,   # reasoning tokens eat into budget; needs headroom
             top_p=0.95,
             stream=False,
-            extra_body={"reasoning_effort": "high"},
+            extra_body={"reasoning_effort": "medium"},
         )
 
         raw = response.choices[0].message.content.strip()
@@ -236,15 +237,32 @@ def analyze_failure(
 # ---------------------------------------------------------------------------
 
 def _parse_spec(raw: str) -> tuple[Optional[RootCauseSpec], Optional[str]]:
-    """Extract and validate JSON from model output."""
+    """Extract and validate JSON from model output, with truncation repair."""
     # Strip any accidental markdown fences
     cleaned = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
     cleaned = re.sub(r"```\s*$", "", cleaned, flags=re.MULTILINE).strip()
 
+    if not cleaned:
+        return None, "Model returned empty content"
+
+    # Attempt to repair truncated JSON — if it ends mid-string, close it out
+    # This handles finish_reason=length where JSON is cut off before closing brace
+    if not cleaned.endswith("}"):
+        # Find the last complete key-value pair by truncating after the last comma
+        # or after the last complete quoted string value
+        last_complete = max(
+            cleaned.rfind('",'),   # ends after a string value
+            cleaned.rfind('",\n'), # same with newline
+        )
+        if last_complete > 0:
+            cleaned = cleaned[:last_complete + 2] + "\n}"  # close the object
+        else:
+            cleaned = cleaned.rstrip(",") + "\n}"
+
     try:
         data = json.loads(cleaned)
     except json.JSONDecodeError as e:
-        return None, f"JSONDecodeError: {e}"
+        return None, f"JSONDecodeError: {e} | cleaned[:200]={cleaned[:200]!r}"
 
     required = {"fault_type", "root_cause_explanation", "target_file",
                 "remediation_strategy", "confidence"}
