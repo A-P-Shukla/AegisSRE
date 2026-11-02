@@ -1,0 +1,70 @@
+[project]
+name = "aegissre"
+version = "0.1.0"
+description = "Autonomous Site Reliability Engine — Meta Global AI Developer Hackathon 2026"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    # Core inference / Modal
+    "modal>=1.0.0",
+    "openai>=1.35.7",
+
+    # Privacy / PII scrubbing
+    "blindlog>=1.2.1",
+
+    # Web framework
+    "fastapi>=0.111.0",
+    "uvicorn>=0.30.1",
+
+    # GitHub REST API
+    "PyGithub>=2.3.0",
+
+    # Patch application
+    "patch>=1.16",
+
+    # Env / config
+    "python-dotenv>=1.0.1",
+
+    # HTTP (used by PyGithub and Modal internally)
+    "httpx>=0.27.0",
+]
+
+[project.optional-dependencies]
+# Installed inside Modal container images only — not needed locally
+modal-sam = [
+    "torch>=2.3.1",
+    "torchvision>=0.18.1",
+    "pillow>=10.3.0",
+    "numpy>=1.26.4",
+    "huggingface_hub>=0.23.4",
+    # sam2 installed via git in the container image
+]
+modal-coder = [
+    "vllm>=0.5.3",
+    "torch>=2.3.1",
+    "huggingface_hub>=0.23.4",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = [
+    "main",
+    "pii_scrubber",
+    "modal_sam",
+    "modal_reasoning",
+    "modal_coder",
+    "github_ops",
+    "pipeline",
+    "webhook",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.7",
+    "httpx>=0.27.0",
+    "ruff>=0.4.7",
+]
