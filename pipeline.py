@@ -25,7 +25,7 @@ from typing import Optional
 from pii_scrubber import scrub
 from modal_sam import segment_image
 from modal_reasoning import analyze_failure
-from modal_coder import CoderModel
+from modal_coder import generate_patch
 from github_ops import (
     get_file_content,
     get_git_diff,
@@ -148,8 +148,7 @@ def run_pipeline(payload: PipelineInput) -> PipelineResult:
             stages=stages,
         )
 
-    coder = CoderModel()
-    coder_result = coder.generate_patch.remote(
+    coder_result = generate_patch.remote(
         target_file=spec["target_file"],
         file_content=file_content,
         remediation_strategy=spec["remediation_strategy"],

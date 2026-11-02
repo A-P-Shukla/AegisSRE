@@ -19,6 +19,7 @@ from typing import Union
 
 from dotenv import load_dotenv
 from blindlog import BlindLogger, BlindLogConfig, DEFAULT_SENSITIVE_KEYS
+import re as _re
 
 load_dotenv()
 
@@ -32,13 +33,38 @@ _config = BlindLogConfig(
     # Extend the default sensitive key set with SRE-specific fields
     sensitive_keys=DEFAULT_SENSITIVE_KEYS | frozenset({
         "user_id", "username", "account_id", "customer_id",
-        "session_id", "request_id", "trace_id",
+        "session_id", "request_id", "trace_id", "session",
         "github_token", "modal_token", "webhook_secret",
     }),
     debug_mode=False,
 )
 
 _logger = BlindLogger(config=_config)
+
+# ---------------------------------------------------------------------------
+# Supplemental regex pass for key=value token patterns in plain log strings
+# BlindLog's string masker is pattern-based; it won't catch arbitrary
+# key=value pairs unless the value matches a known pattern (email, IP, etc.)
+# We add a second pass for common SRE log token fields.
+# ---------------------------------------------------------------------------
+_KV_PATTERN = _re.compile(
+    r'\b(session|token|auth|jwt|sid|request_id|trace_id|span_id|correlation_id)'
+    r'[=:]\s*([A-Za-z0-9_\-\.]{8,})',
+    _re.IGNORECASE,
+)
+
+
+def _supplemental_scrub(text: str) -> str:
+    """Mask key=value token patterns not caught by BlindLog's built-in patterns."""
+    import hashlib
+    def _replace(m: _re.Match) -> str:
+        key, val = m.group(1), m.group(2)
+        digest = hashlib.blake2b(
+            val.encode(), digest_size=4,
+            key=_config.secret_key.encode()[:32],
+        ).hexdigest()
+        return f"{key}=ref_{digest}"
+    return _KV_PATTERN.sub(_replace, text)
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -62,7 +88,10 @@ def scrub(raw: Payload) -> Payload:
     Returns:
         Same type as input with PII replaced.
     """
-    return _logger.mask(raw)
+    result = _logger.mask(raw)
+    if isinstance(result, str):
+        result = _supplemental_scrub(result)
+    return result
 
 
 def scrub_dict(data: dict) -> dict:
